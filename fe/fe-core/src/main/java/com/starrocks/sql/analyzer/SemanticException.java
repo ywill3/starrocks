@@ -53,6 +53,11 @@ public class SemanticException extends StarRocksPlannerException {
         this(format(formatString, args), NodePosition.ZERO);
     }
 
+    public SemanticException(String detailMsg, Exception cause) {
+        super(detailMsg, ErrorType.USER_ERROR, cause);
+        this.detailMsg = detailMsg;
+        this.pos = NodePosition.ZERO;
+    }
 
     @Override
     public String getMessage() {
