@@ -270,6 +270,7 @@ public class CatalogUtils {
         }
     }
 
+    // NOTE: it would modify the PartitionInfo, needs to be protected under the WriteLock
     public static void checkPartitionValuesExistForAddListPartition(OlapTable olapTable, PartitionDesc partitionDesc,
                                                                     boolean isTemp)
             throws DdlException {

@@ -1025,12 +1025,13 @@ public class LocalMetastore implements ConnectorMetadata {
         }
     }
 
-    private void analyzeAddPartition(OlapTable olapTable, List<PartitionDesc> partitionDescs,
+    /**
+     * Analyze basic properties for added partitions
+     */
+    private void analyzeAddPartitionProperties(OlapTable olapTable, List<PartitionDesc> partitionDescs,
                                      AddPartitionClause addPartitionClause, PartitionInfo partitionInfo)
             throws DdlException, AnalysisException, NotImplementedException {
 
-        Set<String> existPartitionNameSet =
-                CatalogUtils.checkPartitionNameExistForAddPartitions(olapTable, partitionDescs);
         // partition properties is prior to clause properties
         // clause properties is prior to table properties
         // partition properties should inherit table properties
@@ -1057,16 +1058,38 @@ public class LocalMetastore implements ConnectorMetadata {
                 RangePartitionInfo rangePartitionInfo = (RangePartitionInfo) partitionInfo;
                 SingleRangePartitionDesc singleRangePartitionDesc = ((SingleRangePartitionDesc) partitionDesc);
                 singleRangePartitionDesc.analyze(rangePartitionInfo.getPartitionColumns().size(), cloneProperties);
-                if (!existPartitionNameSet.contains(singleRangePartitionDesc.getPartitionName())) {
-                    rangePartitionInfo.checkAndCreateRange(singleRangePartitionDesc,
-                            addPartitionClause.isTempPartition());
-                }
             } else if (partitionDesc instanceof SingleItemListPartitionDesc
                     || partitionDesc instanceof MultiItemListPartitionDesc) {
                 List<ColumnDef> columnDefList = partitionInfo.getPartitionColumns().stream()
                         .map(item -> new ColumnDef(item.getName(), new TypeDef(item.getType())))
                         .collect(Collectors.toList());
                 partitionDesc.analyze(columnDefList, cloneProperties);
+            } else {
+                throw new DdlException("Only support adding partition to range/list partitioned table");
+            }
+        }
+    }
+
+    /**
+     * Analyze and ADD the partitions into memory-structure
+     */
+    private void analyzeAddPartition(OlapTable olapTable,
+                                     List<PartitionDesc> partitionDescs,
+                                     AddPartitionClause addPartitionClause,
+                                     PartitionInfo partitionInfo) throws DdlException {
+
+        Set<String> existPartitionNameSet =
+                CatalogUtils.checkPartitionNameExistForAddPartitions(olapTable, partitionDescs);
+        for (PartitionDesc partitionDesc : partitionDescs) {
+            if (partitionDesc instanceof SingleRangePartitionDesc) {
+                RangePartitionInfo rangePartitionInfo = (RangePartitionInfo) partitionInfo;
+                SingleRangePartitionDesc singleRangePartitionDesc = ((SingleRangePartitionDesc) partitionDesc);
+                if (!existPartitionNameSet.contains(singleRangePartitionDesc.getPartitionName())) {
+                    rangePartitionInfo.checkAndCreateRange(singleRangePartitionDesc,
+                            addPartitionClause.isTempPartition());
+                }
+            } else if (partitionDesc instanceof SingleItemListPartitionDesc
+                    || partitionDesc instanceof MultiItemListPartitionDesc) {
                 if (!existPartitionNameSet.contains(partitionDesc.getPartitionName())) {
                     CatalogUtils.checkPartitionValuesExistForAddListPartition(olapTable, partitionDesc,
                             addPartitionClause.isTempPartition());
@@ -1384,7 +1407,6 @@ public class LocalMetastore implements ConnectorMetadata {
         OlapTable copiedTable;
 
         db.readLock();
-        Set<String> checkExistPartitionName = Sets.newConcurrentHashSet();
         try {
             olapTable = checkTable(db, tableName);
 
@@ -1395,7 +1417,7 @@ public class LocalMetastore implements ConnectorMetadata {
             checkPartitionType(partitionInfo);
 
             // analyze add partition
-            analyzeAddPartition(olapTable, partitionDescs, addPartitionClause, partitionInfo);
+            analyzeAddPartitionProperties(olapTable, partitionDescs, addPartitionClause, partitionInfo);
 
             // get distributionInfo
             distributionInfo = getDistributionInfo(olapTable, addPartitionClause).copy();
@@ -1405,8 +1427,7 @@ public class LocalMetastore implements ConnectorMetadata {
             checkColocation(db, olapTable, distributionInfo, partitionDescs);
             copiedTable = getShadowCopyTable(olapTable);
             copiedTable.setDefaultDistributionInfo(distributionInfo);
-            checkExistPartitionName = CatalogUtils.checkPartitionNameExistForAddPartitions(olapTable, partitionDescs);
-        } catch (AnalysisException | NotImplementedException e) {
+        } catch (NotImplementedException | AnalysisException e) {
             throw new DdlException(e.getMessage(), e);
         } finally {
             db.readUnlock();
@@ -1415,6 +1436,20 @@ public class LocalMetastore implements ConnectorMetadata {
         Preconditions.checkNotNull(distributionInfo);
         Preconditions.checkNotNull(olapTable);
         Preconditions.checkNotNull(copiedTable);
+
+        // Add partitions into PartitionInfo
+        // Since it would modify the PartitionInfo, we need to put it under write lock
+        // Since it's a read & write atomic operation, we need to make the whole operation exclusive
+        Set<String> checkExistPartitionName;
+        db.writeLock();
+        try {
+            // analyze add partition
+            PartitionInfo partitionInfo = olapTable.getPartitionInfo();
+            analyzeAddPartition(olapTable, partitionDescs, addPartitionClause, partitionInfo);
+            checkExistPartitionName = CatalogUtils.checkPartitionNameExistForAddPartitions(olapTable, partitionDescs);
+        } finally {
+            db.writeUnlock();
+        }
 
         // create partition outside db lock
         checkDataProperty(partitionDescs);
@@ -1427,7 +1462,7 @@ public class LocalMetastore implements ConnectorMetadata {
                     createPartitionMap(db, copiedTable, partitionDescs, partitionNameToTabletSet, tabletIdSetForAll,
                             checkExistPartitionName);
 
-            // build partitions
+            // build partitions, which is a time-consuming operation
             List<Partition> partitionList = newPartitions.stream().map(x -> x.first).collect(Collectors.toList());
             buildPartitions(db, copiedTable, partitionList.stream().map(Partition::getSubPartitions)
                     .flatMap(p -> p.stream()).collect(Collectors.toList()));
