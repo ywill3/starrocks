@@ -164,7 +164,8 @@ public class StatementPlanner {
     private static boolean isLockFreeInsertStmt(InsertStmt insertStmt,
                                                 ConnectContext connectContext) {
         boolean isSelect = !(insertStmt.getQueryStatement().getQueryRelation() instanceof ValuesRelation);
-        boolean isLeader = GlobalStateMgr.getCurrentState().isLeader();
+        boolean isLeader = GlobalStateMgr.getCurrentState().isLeader() ||
+                Config.enable_planner_optimistic_lock_on_follower;
         boolean isOnlyOlapTableQueries = AnalyzerUtils.isOnlyHasOlapTables(insertStmt);
         return isOnlyOlapTableQueries && isSelect && isLeader &&
                 !connectContext.getSessionVariable().isCboUseDBLock();
@@ -176,7 +177,7 @@ public class StatementPlanner {
         // 2. node is leader node
         // 3. cbo_use_lock_db = false
         return isOnlyOlapTable
-                && GlobalStateMgr.getCurrentState().isLeader()
+                && (GlobalStateMgr.getCurrentState().isLeader() || Config.enable_planner_optimistic_lock_on_follower)
                 && !session.getSessionVariable().isCboUseDBLock();
     }
 
