@@ -29,15 +29,9 @@ public class SetTest extends PlanTestBase {
     public void testValuesNodePredicate() throws Exception {
         String queryStr = "SELECT 1 AS z, MIN(a.x) FROM (select 1 as x) a WHERE abs(1) = 2";
         String explainString = getFragmentPlan(queryStr);
-<<<<<<< HEAD
-        Assert.assertTrue(explainString.contains("  3:Project\n" +
-                "  |  <slot 3> : 3: min\n" +
-                "  |  <slot 4> : 1\n" +
-=======
         Assert.assertTrue(explainString.contains("4:Project\n" +
                 "  |  <slot 4> : 4: min\n" +
                 "  |  <slot 5> : 1\n" +
->>>>>>> 01f048a733 ([Enhancement] support constant folding in translating scalarOperator phase (#50734))
                 "  |  \n" +
                 "  3:AGGREGATE (update finalize)\n" +
                 "  |  output: min(1)\n" +
