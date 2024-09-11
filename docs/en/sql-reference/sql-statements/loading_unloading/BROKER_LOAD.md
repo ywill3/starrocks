@@ -87,7 +87,7 @@ INTO TABLE <table_name>
 
   - `hdfs_host`: the IP address of the NameNode host in the HDFS cluster.
 
-  - `hdfs_host`: the FS port of the NameNode host in the HDFS cluster. The default port number is `9000`.
+  - `hdfs_port`: the FS port of the NameNode host in the HDFS cluster. The default port number is `9000`.
 
   > **NOTICE**
   >
